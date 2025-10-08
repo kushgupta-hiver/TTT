@@ -60,6 +60,24 @@ func TestOutcome_WinRowsColsDiags(t *testing.T) {
 			},
 			out: engine.InProgress,
 		},
+		{
+			name: "empty board",
+			board: engine.Board{
+				engine.Empty, engine.Empty, engine.Empty,
+				engine.Empty, engine.Empty, engine.Empty,
+				engine.Empty, engine.Empty, engine.Empty,
+			},
+			out: engine.InProgress,
+		},
+		{
+			name: "in-progress-2",
+			board: engine.Board{
+				engine.X, engine.O, engine.Empty,
+				engine.X, engine.O, engine.O,
+				engine.O, engine.X,
+			},
+			out: engine.InProgress,
+		},
 	}
 
 	for _, tt := range tests {
