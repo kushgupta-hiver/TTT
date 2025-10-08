@@ -25,7 +25,7 @@ func TestWS_AssignStartAndFirstMove(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	// Spin server with handler (not implemented yet -> this test will fail)
+	// Spin server with handler
 	s := ws.NewServer(ws.Config{}, engine.NewEngine())
 	ts := httptest.NewServer(s)
 	defer ts.Close()
