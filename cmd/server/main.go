@@ -14,11 +14,19 @@ func main() {
 	if v := os.Getenv("ADDR"); v != "" {
 		addr = v
 	}
+
 	mux := http.NewServeMux()
+
+	// Create ONE ws handler instance
+	wsHandler := ws.NewServer(ws.Config{}, engine.NewEngine())
+
+	mux.Handle("/ws", wsHandler)   // matches exactly /ws
+	mux.Handle("/ws/", wsHandler)  // matches /ws/<anything>, e.g., /ws/1234
+
+	// Optional info page
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("TicTacToe WS server. Connect via /ws\n"))
+		_, _ = w.Write([]byte("TicTacToe WS server.\nTry: ws://<host>/ws  (auto-match)\nOr:  ws://<host>/ws/1234  (room)\n"))
 	}))
-	mux.Handle("/ws", ws.NewServer(ws.Config{}, engine.NewEngine()))
 
 	log.Printf("listening on %s ...", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {

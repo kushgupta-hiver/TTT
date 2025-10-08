@@ -18,11 +18,6 @@ clean:
 	go clean -modcache
 	go clean -testcache
 	go clean -cache
-	go clean -moddir
-	go clean -modcache
-	go clean -testcache
-	go clean -cache
-	go clean -moddir
 
 build:
 	echo "Building server..."
@@ -37,5 +32,4 @@ clean-build:
 	go clean -modcache
 	go clean -testcache
 	go clean -cache
-	go clean -moddir
 	go build -o ttt ./cmd/server/main.go

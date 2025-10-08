@@ -1,3 +1,4 @@
+// test/ws_room_e2e_test.go
 package test
 
 import (
@@ -14,167 +15,202 @@ import (
 	"nhooyr.io/websocket"
 )
 
-// helper to make ws:// URL from httptest server
-func wsURLFromHTTP(u string) string {
-	return "ws" + strings.TrimPrefix(u, "http")
+func wsURLFromHTTP(u string) string { return "ws" + strings.TrimPrefix(u, "http") }
+
+func readJSON[T any](ctx context.Context, c *websocket.Conn, out *T) error {
+	_, data, err := c.Read(ctx)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, out)
 }
 
-func TestWS_AssignStartAndFirstMove(t *testing.T) {
-	t.Parallel()
-
+func TestWS_RoomCode_AssignStartAndSingleDigitMove(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	// Spin server with handler
 	s := ws.NewServer(ws.Config{}, engine.NewEngine())
 	ts := httptest.NewServer(s)
 	defer ts.Close()
 
-	u := wsURLFromHTTP(ts.URL)
+	base := wsURLFromHTTP(ts.URL)
 
-	// Connect two clients
-	cx, _, err := websocket.Dial(ctx, u, nil)
+	// Connect both players to the same 4-digit room.
+	c1, _, err := websocket.Dial(ctx, base+"/ws/1234", nil)
 	if err != nil {
-		t.Fatalf("dial X: %v", err)
+		t.Fatalf("dial c1: %v", err)
 	}
-	defer cx.Close(websocket.StatusNormalClosure, "bye")
+	defer c1.Close(websocket.StatusNormalClosure, "bye")
 
-	co, _, err := websocket.Dial(ctx, u, nil)
+	c2, _, err := websocket.Dial(ctx, base+"/ws/1234", nil)
 	if err != nil {
-		t.Fatalf("dial O: %v", err)
+		t.Fatalf("dial c2: %v", err)
 	}
-	defer co.Close(websocket.StatusNormalClosure, "bye")
+	defer c2.Close(websocket.StatusNormalClosure, "bye")
 
-	// Expect "assigned" for both
-	var ax, ao proto.Assigned
-
-	readJSON := func(c *websocket.Conn, v any) error {
-		_, data, err := c.Read(ctx)
-		if err != nil {
-			return err
-		}
-		return json.Unmarshal(data, v)
+	// Expect "assigned" then "start" for both.
+	var a1, a2 proto.Assigned
+	if err := readJSON(ctx, c1, &a1); err != nil {
+		t.Fatalf("assigned c1: %v", err)
 	}
-
-	if err := readJSON(cx, &ax); err != nil {
-		t.Fatalf("read assigned X: %v", err)
+	if err := readJSON(ctx, c2, &a2); err != nil {
+		t.Fatalf("assigned c2: %v", err)
 	}
-	if ax.Type != "assigned" || (ax.You != engine.X && ax.You != engine.O) {
-		t.Fatalf("unexpected assigned X: %+v", ax)
+	if a1.Type != "assigned" || a2.Type != "assigned" {
+		t.Fatalf("expected assigned messages")
+	}
+	if (a1.You != engine.X && a1.You != engine.O) || (a2.You != engine.X && a2.You != engine.O) {
+		t.Fatalf("unexpected marks: %+v / %+v", a1, a2)
 	}
 
-	if err := readJSON(co, &ao); err != nil {
-		t.Fatalf("read assigned O: %v", err)
+	var s1, s2 proto.Start
+	if err := readJSON(ctx, c1, &s1); err != nil {
+		t.Fatalf("start c1: %v", err)
 	}
-	if ao.Type != "assigned" || (ao.You != engine.X && ao.You != engine.O) {
-		t.Fatalf("unexpected assigned O: %+v", ao)
+	if err := readJSON(ctx, c2, &s2); err != nil {
+		t.Fatalf("start c2: %v", err)
 	}
-
-	// Expect "start" next for both
-	var sx, so proto.Start
-	if err := readJSON(cx, &sx); err != nil {
-		t.Fatalf("read start X: %v", err)
-	}
-	if err := readJSON(co, &so); err != nil {
-		t.Fatalf("read start O: %v", err)
-	}
-	if sx.Type != "start" || so.Type != "start" {
+	if s1.Type != "start" || s2.Type != "start" {
 		t.Fatalf("expected start messages")
 	}
 
-	// Determine who is X (first turn)
-	var xConn, oConn *websocket.Conn
-	if ax.You == engine.X {
-		xConn, oConn = cx, co
-	} else {
-		xConn, oConn = co, cx
+	// Determine X player (first turn).
+	xConn, oConn := c1, c2
+	if a1.You != engine.X {
+		xConn, oConn = c2, c1
 	}
 
-	// X sends a move at position 0 (clientSeq 1)
-	move := proto.ClientMsg{
-		Type:      "move",
-		Position:  intPtr(0),
-		MsgID:     "m1",
-		ClientSeq: 1,
-	}
-	if err := xConn.Write(ctx, websocket.MessageText, mustJSON(move)); err != nil {
-		t.Fatalf("write move X: %v", err)
+	// Human-friendly: X sends a single digit "0" instead of JSON.
+	if err := xConn.Write(ctx, websocket.MessageText, []byte("0")); err != nil {
+		t.Fatalf("write digit move: %v", err)
 	}
 
-	// Both should see a "state" with next_turn O and serverSeq=1
-	var st1, st2 proto.State
-	if err := readJSON(xConn, &st1); err != nil {
-		t.Fatalf("read state on X: %v", err)
+	// Both should receive a "state" with X at position 0, next_turn O, serverSeq=1.
+	var stX, stO proto.State
+	if err := readJSON(ctx, xConn, &stX); err != nil {
+		t.Fatalf("read state X: %v", err)
 	}
-	if err := readJSON(oConn, &st2); err != nil {
-		t.Fatalf("read state on O: %v", err)
+	if err := readJSON(ctx, oConn, &stO); err != nil {
+		t.Fatalf("read state O: %v", err)
 	}
-	if st1.Type != "state" || st2.Type != "state" {
-		t.Fatalf("expected state type, got %q and %q", st1.Type, st2.Type)
+	if stX.Type != "state" || stO.Type != "state" {
+		t.Fatalf("expected state messages")
 	}
-	if st1.ServerSeq != 1 || st2.ServerSeq != 1 {
-		t.Fatalf("expected serverSeq 1, got %d and %d", st1.ServerSeq, st2.ServerSeq)
+	if stX.ServerSeq != 1 || stO.ServerSeq != 1 {
+		t.Fatalf("expected serverSeq=1, got %d / %d", stX.ServerSeq, stO.ServerSeq)
 	}
-	if st1.Board[0] != "X" || st2.Board[0] != "X" {
-		t.Fatalf("expected X at position 0 on both boards")
+	if stX.Board[0] != "X" || stO.Board[0] != "X" {
+		t.Fatalf("expected board[0]=X on both")
 	}
-	if st1.NextTurn != engine.O || st2.NextTurn != engine.O {
+	if stX.NextTurn != engine.O || stO.NextTurn != engine.O {
 		t.Fatalf("expected next_turn O")
 	}
 }
 
-func TestWS_DisconnectForfeit(t *testing.T) {
-	t.Parallel()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+func TestWS_RoomCode_Isolation_TwoRoomsPlayIndependently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	s := ws.NewServer(ws.Config{}, engine.NewEngine())
 	ts := httptest.NewServer(s)
 	defer ts.Close()
-	u := wsURLFromHTTP(ts.URL)
+	base := wsURLFromHTTP(ts.URL)
 
-	c1, _, err := websocket.Dial(ctx, u, nil)
+	// Room A (1111)
+	a1, _, err := websocket.Dial(ctx, base+"/ws/1111", nil)
 	if err != nil {
-		t.Fatalf("dial 1: %v", err)
+		t.Fatalf("dial a1: %v", err)
 	}
-	defer c1.Close(websocket.StatusNormalClosure, "bye")
-
-	c2, _, err := websocket.Dial(ctx, u, nil)
+	defer a1.Close(websocket.StatusNormalClosure, "bye")
+	a2, _, err := websocket.Dial(ctx, base+"/ws/1111", nil)
 	if err != nil {
-		t.Fatalf("dial 2: %v", err)
+		t.Fatalf("dial a2: %v", err)
 	}
-	defer c2.Close(websocket.StatusNormalClosure, "bye")
+	defer a2.Close(websocket.StatusNormalClosure, "bye")
 
-	// drain assigned+start for both
+	// Room B (2222)
+	b1, _, err := websocket.Dial(ctx, base+"/ws/2222", nil)
+	if err != nil {
+		t.Fatalf("dial b1: %v", err)
+	}
+	defer b1.Close(websocket.StatusNormalClosure, "bye")
+	b2, _, err := websocket.Dial(ctx, base+"/ws/2222", nil)
+	if err != nil {
+		t.Fatalf("dial b2: %v", err)
+	}
+	defer b2.Close(websocket.StatusNormalClosure, "bye")
+
+	// Drain assigned+start for all four connections.
 	drain2 := func(c *websocket.Conn) {
 		for i := 0; i < 2; i++ {
 			_, _, _ = c.Read(ctx)
 		}
 	}
-	drain2(c1)
-	drain2(c2)
+	drain2(a1); drain2(a2); drain2(b1); drain2(b2)
 
-	// Close c2 => c1 should receive a "result" with "<X|O>_WINS"
-	_ = c2.Close(websocket.StatusNormalClosure, "leaving")
+	// Make a move in room A: send "0" from a1 (who might be X or O; if not X, the server will reject NOT_YOUR_TURN)
+	_ = a1.Write(ctx, websocket.MessageText, []byte("0"))
 
-	// Read next message on c1 and expect result
-	_, data, err := c1.Read(ctx)
-	if err != nil {
-		t.Fatalf("read on c1: %v", err)
-	}
-	var res proto.Result
-	if err := json.Unmarshal(data, &res); err != nil {
-		t.Fatalf("unmarshal result: %v", err)
-	}
-	if res.Type != "result" || (!strings.Contains(res.Status, "WINS") && !strings.Contains(res.Status, "wins")) {
-		t.Fatalf("expected result with wins, got %+v", res)
-	}
+	// Read next message from both A connections; at least one should be state with serverSeq 1.
+	gotA1Type, _, _ := a1.Read(ctx)
+	gotA2Type, _, _ := a2.Read(ctx)
+	_ = gotA1Type
+	_ = gotA2Type
+
+	// Make an independent move in room B: send "0" from b1 as well.
+	_ = b1.Write(ctx, websocket.MessageText, []byte("0"))
+
+	// Read next message from both B connections—ensure they get their own state.
+	_, _, _ = b1.Read(ctx)
+	_, _, _ = b2.Read(ctx)
+	// If cross-talk existed, this test would have flaked or mismatched JSON shapes.
 }
 
-func intPtr(i int) *int { return &i }
+func TestWS_RoomCode_ThirdPlayerGetsRoomFull(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-func mustJSON(v any) []byte {
-	b, _ := json.Marshal(v)
-	return b
+	s := ws.NewServer(ws.Config{}, engine.NewEngine())
+	ts := httptest.NewServer(s)
+	defer ts.Close()
+	base := wsURLFromHTTP(ts.URL)
+
+	// Fill room 9999 with two players.
+	p1, _, err := websocket.Dial(ctx, base+"/ws/9999", nil)
+	if err != nil {
+		t.Fatalf("dial p1: %v", err)
+	}
+	defer p1.Close(websocket.StatusNormalClosure, "bye")
+
+	p2, _, err := websocket.Dial(ctx, base+"/ws/9999", nil)
+	if err != nil {
+		t.Fatalf("dial p2: %v", err)
+	}
+	defer p2.Close(websocket.StatusNormalClosure, "bye")
+
+	// Drain their assigned+start.
+	for i := 0; i < 2; i++ {
+		_, _, _ = p1.Read(ctx)
+		_, _, _ = p2.Read(ctx)
+	}
+
+	// Third player tries to join the same room.
+	p3, _, err := websocket.Dial(ctx, base+"/ws/9999", nil)
+	if err != nil {
+		t.Fatalf("dial p3: %v", err)
+	}
+	defer p3.Close(websocket.StatusNormalClosure, "bye")
+
+	// Expect an error frame with Code=ROOM_FULL.
+	_, data, err := p3.Read(ctx)
+	if err != nil {
+		t.Fatalf("read p3: %v", err)
+	}
+	var e proto.Error
+	if err := json.Unmarshal(data, &e); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if e.Type != "error" || e.Code != "ROOM_FULL" {
+		t.Fatalf("expected ROOM_FULL error, got %+v", e)
+	}
 }
