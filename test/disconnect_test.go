@@ -31,10 +31,7 @@ func TestOpponentWinsOnDisconnect_NoGrace(t *testing.T) {
 	}
 }
 
-// Optional: grace period where opponent can rejoin
 func TestRejoinWithinGrace_PreventsForfeit(t *testing.T) {
-	t.Skip("enable when grace rejoin implemented")
-
 	ctx := context.Background()
 	e := engine.NewEngine()
 	r := match.NewRoom("r-grace", e, match.Options{GracePeriod: 800 * time.Millisecond})
@@ -51,5 +48,30 @@ func TestRejoinWithinGrace_PreventsForfeit(t *testing.T) {
 	s := r.State()
 	if s.Status != engine.InProgress {
 		t.Fatalf("expected InProgress after rejoin within grace, got %v", s.Status)
+	}
+
+	// also ensure no late timer flips status
+	time.Sleep(700 * time.Millisecond) // total > grace
+	s = r.State()
+	if s.Status != engine.InProgress {
+		t.Fatalf("expected still InProgress after grace elapsed, got %v", s.Status)
+	}
+}
+
+// New: if not rejoined, forfeit triggers after grace
+func TestForfeitAfterGrace_NoRejoin(t *testing.T) {
+	ctx := context.Background()
+	e := engine.NewEngine()
+	r := match.NewRoom("r-grace2", e, match.Options{GracePeriod: 200 * time.Millisecond})
+
+	_ = r.Join(ctx, match.Player{ID: "px", Mark: engine.X})
+	_ = r.Join(ctx, match.Player{ID: "po", Mark: engine.O})
+
+	_ = r.Leave(ctx, "po")
+
+	time.Sleep(300 * time.Millisecond) // > grace
+	s := r.State()
+	if s.Status != engine.XWins {
+		t.Fatalf("expected XWins after grace expiry, got %v", s.Status)
 	}
 }
