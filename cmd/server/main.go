@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/kushgupta-hiver/TTT/internal/engine"
 	"github.com/kushgupta-hiver/TTT/internal/transport/ws"
@@ -15,17 +16,26 @@ func main() {
 		addr = v
 	}
 
+	// Grace period configurable via env (default 30s)
+	grace := 30 * time.Second
+	if v := os.Getenv("GRACE_SECONDS"); v != "" {
+		if d, err := time.ParseDuration(v + "s"); err == nil {
+			grace = d
+		}
+	}
+	log.Printf("starting server addr=%s grace_period=%s", addr, grace)
+
 	mux := http.NewServeMux()
+	handler := ws.NewServer(ws.Config{
+		WriteTimeout: 2 * time.Second,
+		GracePeriod:  grace,
+	}, engine.NewEngine())
 
-	// Create ONE ws handler instance
-	wsHandler := ws.NewServer(ws.Config{}, engine.NewEngine())
+	mux.Handle("/ws", handler)
+	mux.Handle("/ws/", handler)
 
-	mux.Handle("/ws", wsHandler)   // matches exactly /ws
-	mux.Handle("/ws/", wsHandler)  // matches /ws/<anything>, e.g., /ws/1234
-
-	// Optional info page
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("TicTacToe WS server.\nTry: ws://<host>/ws  (auto-match)\nOr:  ws://<host>/ws/1234  (room)\n"))
+		_, _ = w.Write([]byte("TicTacToe WS server.\nUse: ws://host/ws or ws://host/ws/1234\nRejoin: ws://host/ws/rejoin/<token>\n"))
 	}))
 
 	log.Printf("listening on %s ...", addr)
