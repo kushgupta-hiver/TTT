@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"log"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -49,10 +50,11 @@ func NewServer(cfg Config, eng engine.Engine) Server {
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		OriginPatterns: []string{"*"},
+		OriginPatterns: nil,
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {
+		log.Printf("websocket accept failed: %v (remote=%s path=%s)", err, r.RemoteAddr, r.URL.Path)
 		http.Error(w, "failed to upgrade", http.StatusBadRequest)
 		return
 	}
