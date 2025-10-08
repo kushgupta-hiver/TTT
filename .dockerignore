@@ -1,0 +1,21 @@
+# VCS & IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# Go build caches
+**/*.test
+**/bin
+**/dist
+**/build
+**/coverage.*
+**/.cache
+**/tmp
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Tests (optional; comment out to run tests in image)
+test/
