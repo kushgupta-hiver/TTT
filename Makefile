@@ -6,12 +6,15 @@ SHELL := /bin/bash
 
 
 tidy:
+	echo "Tidying dependencies..."
 	go mod tidy
 
 test:
+	echo "Running tests..."
 	go test ./... -v
 
 clean:
+	echo "Cleaning..."
 	go clean -modcache
 	go clean -testcache
 	go clean -cache
@@ -22,12 +25,15 @@ clean:
 	go clean -moddir
 
 build:
+	echo "Building server..."
 	go build -o ttt ./cmd/server/main.go
 
 run:
+	echo "Running server... (after building!)"
 	./ttt
 
 clean-build:
+	echo "Cleaning and building server..."
 	go clean -modcache
 	go clean -testcache
 	go clean -cache
